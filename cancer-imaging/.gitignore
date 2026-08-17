@@ -1,0 +1,7 @@
+.venv
+data/
+dataset/
+model/
+sample/*
+*.nii.gz
+!sample/dataset.json
