@@ -5,3 +5,4 @@ model/
 sample/*
 *.nii.gz
 !sample/dataset.json
+!sample/*.png
