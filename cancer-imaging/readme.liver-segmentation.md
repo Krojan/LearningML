@@ -2,7 +2,7 @@
 
 ## 1. Abstract
 
-This report presents a 3D deep learning pipeline for automated liver and hepatic tumor segmentation from contrast-enhanced CT volumes, built on the Medical Segmentation Decathlon liver dataset. A 3D U-Net architecture was trained to classify each voxel into one of three classes: background, liver, and cancer (tumor). The pipeline includes spacing normalization, foreground cropping, patch-based training with foreground-biased sampling, and sliding-window inference for full-volume evaluation. The model was trained on 50 volumes and validated on 15 held-out volumes using a single fixed split, achieving a mean validation Dice score of 0.7895 for the liver class. Tumor segmentation remained substantially more difficult, with a Dice score of 0.0014, reflecting the challenge posed by severe class imbalance and small lesion size. This report documents the technical pipeline, engineering challenges encountered during development, and directions for improving tumor-level performance.
+This report presents a 3D deep learning pipeline for automated liver and hepatic tumor segmentation from contrast-enhanced CT volumes, built on the Medical Segmentation Decathlon liver dataset. A 3D U-Net architecture was trained to classify each voxel into one of three classes: background, liver, and cancer (tumor). The pipeline includes spacing normalization, foreground cropping, patch-based training with foreground-biased sampling, and sliding-window inference for full-volume evaluation. The model was trained on 50 volumes and validated on 15 volumes using a single fixed split, achieving a mean validation Dice score of 0.837 for the liver class. Tumor segmentation remained substantially more difficult, with a Dice score of 0.0026, reflecting the challenge posed by severe class imbalance and small lesion size. This report documents the technical pipeline,  challenges encountered during development, and directions for improving tumor-level performance.
 
 ## 2. Problem Trying to Solve
 
@@ -47,7 +47,7 @@ Two spacing configurations were empirically compared:
 
 | Configuration | `pixdim` (x, y, z) mm | Liver Dice |
 |---|---|---|
-| Fine z-spacing | (1.5, 1.5, 1.0) | **0.7895** (best) |
+| Fine z-spacing | (1.5, 1.5, 1.0) | **0.837** (best) |
 | Coarse z-spacing | (1.5, 1.5, 2.0) | Lower (not retained) |
 
 The finer z-spacing (1.0 mm) was retained for the reported results, as it produced a measurably higher liver Dice score than the coarser alternative, despite the additional computational cost of larger resampled volumes.
@@ -61,8 +61,8 @@ The finer z-spacing (1.0 mm) was retained for the reported results, as it produc
 Since 3D volumes are resource intensive, the model was trained on fixed-size 3D patches rather than full volumes.
 
 - **Patch size:** 128 × 128 × 64 voxels
-- **Sampling strategy:** foreground-biased random cropping (positive:negative ratio 1:1), extracting 4 patches per volume per training pass, ensuring the model is regularly exposed to liver and tumor regions despite their relative scarcity within the full volume.
-- **Augmentation:** independent random flips along each spatial axis (probability 0.10 each) and random 90° rotations (probability 0.10), applied after patch extraction to increase effective training diversity given the limited dataset size.
+- **Sampling strategy:** Foreground-biased random cropping (positive:negative ratio 1:1), extracting 4 patches per volume per training pass, ensuring the model is regularly exposed to liver and tumor regions despite their relative scarcity within the full volume.
+- **Augmentation:** Independent random flips along each spatial axis (probability 0.10 each) and random 90° rotations (probability 0.10), applied after patch extraction to increase effective training diversity given the limited dataset size. Increasing the probability from 0.1 to 0.5 resulted in a lower Dice score (0.787). Therefore, a probability of 0.1 was retained.
 
 ### 3.5 Model Architecture — 3D U-Net
 
@@ -101,17 +101,31 @@ dice_metric_per_class = DiceMetric(include_background=False, reduction="mean_bat
 | Blending mode | Gaussian-weighted/constant |
 
 ### 3.6 Training Configuration
+The model was trained for a maximum of 100 epochs using the following configuration. Model performance was evaluated at 5-epoch intervals, with a patience of 15 epochs. As no further improvement was observed within the patience period, training was terminated at epoch 45. The checkpoint corresponding to epoch 45 was subsequently used for evaluation.
 
-| Parameter | Value |
-|---|---|
-| Epochs | 50 |
-| Batch size | 1 |
-| Learning rate | 1e-5 |
-| Optimizer |Adam |
-| Hardware | Apple M4 Pro (MPS backend) |
+| Parameter               | Configuration        |
+| ----------------------- | -------------------- |
+| Maximum epochs          | 100                  |
+| Stopping epoch         | 45                   |
+| Evaluation interval     | Every 5 epochs       |
+| Early-stopping patience | 15 epochs            |
+| Batch size              | 1                    |
+| Learning rate           | \(1 \times 10^{-5}\) |
+| Optimizer               | Adam                 |
+
+### 3.6 System Configuration Table
+| Component    | Configuration                           |
+| ------------ | --------------------------------------- |
+| OS           | Windows 10 Home Single Language, 64-bit |
+| CPU          | Intel Core i9-14900HX                   |
+| RAM          | 16 GB                                   |
+| GPU          | NVIDIA GeForce RTX 4070 Laptop GPU      |
+| GPU VRAM     | 8 GB                                    |
+| PyTorch      | 2.13.0+cu130                            |
+| CUDA runtime | 13.0                                    |
 
 
-### 3.7 Problems Encountered and Solutions
+### 3.8 Problems Encountered and Solutions
 
 Several practical engineering challenges arose during pipeline development, summarized below.
 
@@ -127,21 +141,21 @@ Several practical engineering challenges arose during pipeline development, summ
 ## 4. Observations
 
 - The preprocessing pipeline, observed on one instance of random transformation, substantially reduced class imbalance by increasing the proportion of liver and tumor voxels relative to total volume, with liver voxels increasing from 2.37% to 18.51% and tumor voxels from 0.12% to 0.66%, while tumor voxels still constituting less than 1% of the training volume.
-- The model achieved strong segmentation performance on the **liver** class (Dice ≈ 0.79), even on small number of epochs, indicating that the overall pipeline — spacing normalization, patch-based training, and sliding-window inference — is effective for large, well-defined anatomical structures.
-- Tumor (**cancer**) segmentation performance was very poor (Dice ≈ 0.001), despite foreground-biased patch sampling intended to expose the model to tumor regions more frequently. This is consistent with the known difficulty of small-lesion segmentation under severe class imbalance, and suggests the tumor class requires additional targeted intervention and larger training data beyond what was applied in this iteration.
+- The model achieved strong segmentation performance on the **liver** class (Dice ≈ 0.837), even on small number of epochs, indicating that the overall pipeline — spacing normalization, patch-based training, and sliding-window inference — is effective for large, well-defined anatomical structures.
+- Tumor (**cancer**) segmentation performance was very poor (Dice ≈ 0.0026), despite foreground-biased patch sampling intended to expose the model to tumor regions more frequently. This is consistent with the known difficulty of small-lesion segmentation under severe class imbalance, and suggests the tumor class requires additional targeted intervention and larger training data beyond what was applied in this iteration.
 - Finer z-axis voxel spacing (1.0 mm) outperformed coarser spacing (2.0 mm) for liver segmentation, suggesting that spatial resolution — particularly along the axis most affected by slice thickness variability — has a measurable impact on segmentation quality for this task.
 
 ## 5. Conclusion
 
 This project implemented a complete, MONAI-based 3D U-Net pipeline for liver and tumor segmentation from CT volumes, covering data preprocessing, patch-based training with class-imbalance-aware sampling, and full-volume sliding-window inference.
 
-**Final reported metrics** (validation set, single fixed split, 15 volumes, 50 training epochs):
+**Final reported metrics** (validation set, single fixed split, 15 volumes, 45 training epochs):
 
 | Class | Dice Score | Voxel Proportion Before Preprocessing | Voxel Proportion After Preprocessing |
 |---|---:|---:|---:|
-| Foreground (liver + tumor) | 0.5079 | 2.4996% | 19.1826% |
-| Liver | **0.7895** | 2.3772% | **18.5129%** |
-| Tumor | 0.0014 | 0.1224% | 0.6697% |
+| Foreground (liver + tumor) | 0.5351 | 2.4996% | 19.1826% |
+| Liver | **0.837** | 2.3772% | **18.5129%** |
+| Tumor | 0.0026 | 0.1224% | 0.6697% |
 
 The results demonstrate that the pipeline is effective for large, anatomically distinct structures (liver), achieving good Dice scores. However, tumor segmentation remains an open problem in this iteration, with and near-zero Dice less than 1 percent training representation, indicating the model largely fails to detect tumor regions.
 
@@ -152,4 +166,4 @@ The results demonstrate that the pipeline is effective for large, anatomically d
 
 ---
 
-*Hardware: Apple M4 Pro (MPS backend). Framework: MONAI (PyTorch-based). Dataset: Medical Segmentation Decathlon, Liver (Task03_Liver).*
+*GPU: NVIDIA GeForce RTX 4070 Laptop GPU(CUDA). Framework: MONAI (PyTorch-based). Dataset: Medical Segmentation Decathlon, Liver (Task03_Liver).*
